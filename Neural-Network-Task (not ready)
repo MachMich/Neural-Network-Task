@@ -1,0 +1,86 @@
+import os
+import torch
+import torch.nn as nn
+from torch.optim import Adam
+from torch.utils.data import DataLoader, TensorDataset
+import csv
+import re
+from nltk.tokenize import word_tokenize
+import numpy as np
+import json
+from torchvision import datasets, transforms
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using {device} device")
+
+class CBOW(nn.Module):
+    def __init__(self, vocab_size, embedding_size=100, hidden_size=128, dropout_rate=0.5):
+        super(CBOW, self).__init__()
+        self.embeddings = nn.Embedding(vocab_size, embedding_size)
+        self.linear1 = nn.Linear(embedding_size, hidden_size)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.linear2 = nn.Linear(hidden_size, vocab_size)
+
+    def forward(self, inputs):
+        embeddings = self.embeddings(inputs).mean(1)
+        x = torch.relu(self.linear1(embeddings))
+        x = self.dropout(x)
+        return self.linear2(x)
+
+def init_weights(m):
+    if type(m) == nn.Linear or type(m) == nn.Embedding:
+        torch.nn.init.xavier_uniform_(m.weight)
+
+model = CBOW(vocab_size=100000).to(device)
+model.apply(init_weights)
+print(model)
+
+def edit_text(text):
+    text = text.lower()
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+    tokens = word_tokenize(text)
+    return tokens
+
+text_data = ["Some example text data.", "Another example sentence."]
+tokenized_data = [edit_text(text) for text in text_data]
+
+word_to_index = {}
+index = 0
+for tokens in tokenized_data:
+    for token in tokens:
+        if token not in word_to_index:
+            word_to_index[token] = index
+            index += 1
+
+indexed_data = [[word_to_index[token] for token in tokens] for tokens in tokenized_data]
+
+max_sequence_length = max(len(tokens) for tokens in indexed_data)
+padded_data = [torch.tensor(tokens + [0] * (max_sequence_length - len(tokens))) for tokens in indexed_data]
+
+dataset = TensorDataset(torch.stack(padded_data))
+dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = Adam(model.parameters(), lr=0.0001)
+
+num_epochs = 10
+for epoch in range(num_epochs):
+    for inputs in dataloader:
+        inputs = inputs[0].to(device)
+
+        optimizer.zero_grad()
+        outputs = model(inputs)
+
+        targets = torch.randint(0, model.linear2.out_features, (inputs.size(0),)).to(device)
+
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+    print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}')
+
+model.eval()
+with torch.no_grad():
+    test_inputs = torch.tensor([[1, 2, 3, 4, 5]]).to(device)
+    predictions = model(test_inputs).argmax(dim=1)
+    print(f"Model Prediction: {predictions.item()}")
