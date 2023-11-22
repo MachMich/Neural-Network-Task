@@ -1,0 +1,117 @@
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+# Import dataset z IMDB
+imdb = keras.datasets.imdb
+(train_data, train_labels), (test_data, test_labels) = imdb.load_data(num_words=10000)
+
+print("Training entries: {}. Labels: {}".format(len(train_data), len(train_labels)))
+print("Sample training data 1:", train_data[0], "\nSample Training Label 1:", train_labels[0])
+
+# Określenie przykładowych zdań
+sentences = [
+    'I love my dog',
+    'I love my cat',
+    'You love my dog!',
+    'Do you think my dog is amazing?'
+]
+
+# W postaci Tokenów
+tokenizer = Tokenizer(num_words=100, oov_token="<OOV>")
+tokenizer.fit_on_texts(sentences)
+word_index = tokenizer.word_index
+
+# Zamień zdania na ciągi
+sequences = tokenizer.texts_to_sequences(sentences)
+
+# Sekwencja ''Pad'ów'' żeby dane wejściowe były tych samych wymiarów ( jeżeli jest za krótkie to wypełnia się je zerami
+padded = pad_sequences(sequences, maxlen=10)
+padded1 = pad_sequences(sequences, padding='post', maxlen=10)
+padded2 = pad_sequences(sequences, maxlen=2)
+
+print("\nSequences =", sequences)  # wyświetl;a oryginalne sekwencje
+print("\nPadded sequences (default) =",
+      padded)  # Wyświetla sekwencje uzyskane po domyślnym dodawaniu paddingu na początku sekwencji do długości 10.
+print("\nPadded sequences (post) =",
+      padded1)  # Wyświetla sekwencje uzyskane po dodawaniu paddingu na końcu sekwencji do długości 10.
+print("\nPadded sequences (maxlen=2) =",
+      padded2)  # Wyświetla sekwencje uzyskane po obcięciu lub uzupełnieniu zerami do maksymalnej długości 2.
+
+word_index = imdb.get_word_index()
+word_index = {k: (v + 3) for k, v in word_index.items()}
+word_index["<PAD>"] = 0
+word_index["<START>"] = 1
+word_index["<UNK>"] = 2
+word_index["<UNUSED>"] = 3
+
+print("Length of DATA 1 before Padding: ", len(train_data[0]), "\nLength of DATA 2 before Padding: ",
+      len(train_data[1]))
+train_data = keras.preprocessing.sequence.pad_sequences(train_data, value=word_index["<PAD>"], padding='post',
+                                                        maxlen=256)
+test_data = keras.preprocessing.sequence.pad_sequences(test_data, value=word_index["<PAD>"], padding='post', maxlen=256)
+print("Length of DATA 1 after Padding: ", len(train_data[0]), "\nLength of DATA 2 after Padding: ", len(train_data[1]))
+
+# Budowanie modelu za pomocą Keras w celu przetwarzania warstw Embedding, GlobalAveragePooling1D oraz Dense
+vocab_size = 10000
+model = keras.Sequential()
+model.add(keras.layers.Embedding(vocab_size, 16))
+model.add(keras.layers.GlobalAveragePooling1D())
+model.add(keras.layers.Dense(16, activation='relu'))
+model.add(keras.layers.Dense(1, activation='sigmoid'))
+
+#  Kompilacja i treningu modelu przy użyciu danych treningowych i walidacyjnych
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+x_val = train_data[:10000]
+partial_x_train = train_data[10000:]
+y_val = train_labels[:10000]
+partial_y_train = train_labels[10000:]
+history = model.fit(partial_x_train, partial_y_train, epochs=40, batch_size=512, validation_data=(x_val, y_val))
+
+# Przetwarzanie danych z zestawu danych IMDB, który zawiera recenzje filmów
+word_index = imdb.get_word_index()
+
+word_index = {k: (v + 3) for k, v in word_index.items()}
+word_index["<PAD>"] = 0
+word_index["<START>"] = 1
+word_index["<UNK>"] = 2  # unknown
+word_index["<UNUSED>"] = 3
+reverse_word_index = dict([(value, key) for (key, value) in word_index.items()])
+
+
+def decode_review(text):
+    return ''.join([reverse_word_index.get(i, '?') for i in text])
+
+
+print("label - Negative\nlabel 1 Positive\n")
+print("Sample sentence")
+print(decode_review(test_data[35]))
+
+# Przetwórz dane testowe do predykcji
+test_data_for_prediction = pad_sequences(tokenizer.texts_to_sequences([decode_review(test_data[35])]), maxlen=256,
+                                         padding='post', value=word_index["<PAD>"])
+
+# Prognozowania etykiet dla danych testowych przy użyciu wytrenowanego modelu klasyfikacji binarnej
+test_pred = model.predict(test_data_for_prediction)
+
+print("Predicted Probability:", test_pred[0][0])
+
+predicted_label = 1 if test_pred[0][0] > 0.5 else 0
+print("Predicted Label:", predicted_label)
+print("True Label:", test_labels[35])
+
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+epochs = range(1, len(acc) + 1)
+plt.plot(epochs, acc, 'b*', label='Training acc')
+plt.plot(epochs, val_acc, 'b', label='Validation acc')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
